@@ -1,32 +1,61 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import { Bot, Context, NextFunction, webhookCallback } from 'grammy';
 
-export interface Env {
-	// Example binding to KV. Learn more at https://developers.cloudflare.com/workers/runtime-apis/kv/
-	// MY_KV_NAMESPACE: KVNamespace;
-	//
-	// Example binding to Durable Object. Learn more at https://developers.cloudflare.com/workers/runtime-apis/durable-objects/
-	// MY_DURABLE_OBJECT: DurableObjectNamespace;
-	//
-	// Example binding to R2. Learn more at https://developers.cloudflare.com/workers/runtime-apis/r2/
-	// MY_BUCKET: R2Bucket;
-	//
-	// Example binding to a Service. Learn more at https://developers.cloudflare.com/workers/runtime-apis/service-bindings/
-	// MY_SERVICE: Fetcher;
-	//
-	// Example binding to a Queue. Learn more at https://developers.cloudflare.com/queues/javascript-apis/
-	// MY_QUEUE: Queue;
+interface Env {
+	BOT_TOKEN: string;
+}
+
+async function replyError(ctx: Context, next: NextFunction): Promise<void> {
+	try {
+		await next();
+	} catch (err: any) {
+		await ctx.reply(err.message);
+	}
 }
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		return new Response('Hello World!');
+		const bot = new Bot(env.BOT_TOKEN);
+
+		bot.use(replyError);
+		bot.on('message', async (ctx) => {
+			let usernames = new Set<string>();
+
+			const forwardOrigin = ctx.message.forward_origin;
+			if (forwardOrigin?.type === 'channel') usernames.add(`@${forwardOrigin.chat.username}`);
+
+			for (const entity of ctx.message.entities ?? []) {
+				const content = ctx.message.text!.slice(entity.offset, entity.offset + entity.length);
+				switch (entity.type) {
+					case 'mention':
+						usernames.add(content);
+						break;
+					case 'url':
+					case 'text_link':
+						let url = entity.type === 'text_link' ? new URL(entity.url) : new URL(content);
+						if (url.hostname === 't.me') {
+							const [_, username] = url.pathname.split('/');
+							if (username.startsWith('+')) continue;
+							usernames.add(`@${username}`);
+						}
+						break;
+				}
+			}
+
+			const promises = Array.from(usernames).map((username) =>
+				(async () => {
+					try {
+						const chat = await ctx.api.getChat(username);
+						if (chat.type !== 'channel') return `@${username}`;
+						return `${username} ${chat.title}`;
+					} catch (err: any) {
+						return `${username} ${err.message}`;
+					}
+				})()
+			);
+			const titles = await Promise.all(promises);
+			await ctx.reply(titles.join('\n'));
+		});
+
+		return await webhookCallback(bot, 'cloudflare-mod')(request);
 	},
 };
