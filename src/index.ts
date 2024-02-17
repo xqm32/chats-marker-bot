@@ -53,6 +53,10 @@ export default {
 				})()
 			);
 			const titles = await Promise.all(promises);
+			if (titles.length === 0) {
+				await ctx.react('🤔');
+				return;
+			}
 			await ctx.reply(titles.join('\n'));
 		});
 
