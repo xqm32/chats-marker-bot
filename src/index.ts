@@ -18,31 +18,35 @@ export default {
 
 		bot.use(replyError);
 		bot.on('message', async (ctx) => {
-			let usernames = new Set<string>();
+			let usernames = new Array<string>();
 
 			const forwardOrigin = ctx.message.forward_origin;
-			if (forwardOrigin?.type === 'channel') usernames.add(`@${forwardOrigin.chat.username}`);
+			if (forwardOrigin?.type === 'channel' && forwardOrigin.chat.username !== undefined) {
+				usernames.push(`@${forwardOrigin.chat.username}`);
+			}
 
 			for (const entity of ctx.message.entities ?? []) {
 				const content = ctx.message.text!.slice(entity.offset, entity.offset + entity.length);
 				switch (entity.type) {
 					case 'mention':
-						usernames.add(content);
+						if (content.endsWith('bot')) continue;
+						usernames.push(content);
 						break;
 					case 'url':
 					case 'text_link':
 						let url = entity.type === 'text_link' ? new URL(entity.url) : new URL(content);
 						if (url.hostname === 't.me') {
 							const [_, username] = url.pathname.split('/');
-							if (username.startsWith('+')) continue; // Skip private links
-							if (username.endsWith('bot')) continue; // Skip bots
-							usernames.add(`@${username}`);
+							if (username.startsWith('+')) continue;
+							else if (username.endsWith('bot')) continue;
+							usernames.push(`@${username}`);
 						}
 						break;
 				}
 			}
 
-			const promises = Array.from(usernames).map((username) =>
+			usernames = Array.from(new Set(usernames));
+			const promises = usernames.map((username) =>
 				(async () => {
 					try {
 						const chat = await ctx.api.getChat(username);
