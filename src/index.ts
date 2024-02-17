@@ -34,7 +34,8 @@ export default {
 						let url = entity.type === 'text_link' ? new URL(entity.url) : new URL(content);
 						if (url.hostname === 't.me') {
 							const [_, username] = url.pathname.split('/');
-							if (username.startsWith('+')) continue;
+							if (username.startsWith('+')) continue; // Skip private links
+							if (username.endsWith('bot')) continue; // Skip bots
 							usernames.add(`@${username}`);
 						}
 						break;
