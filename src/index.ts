@@ -45,7 +45,7 @@ export default {
 				(async () => {
 					try {
 						const chat = await ctx.api.getChat(username);
-						if (chat.type !== 'channel') return `@${username}`;
+						if (chat.type !== 'channel') return username;
 						return `${username} ${chat.title}`;
 					} catch (err: any) {
 						return `${username} ${err.message}`;
