@@ -70,6 +70,11 @@ export default {
 				}
 			}
 
+			if (urls.length > 30) {
+				await ctx.react('🤯');
+				return;
+			}
+
 			let titles = new Array<string>();
 			let errors = new Array<string>();
 			await Promise.all(
