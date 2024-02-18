@@ -66,6 +66,7 @@ export default {
 						break;
 				}
 			}
+
 			urls = Array.from(new Set(urls))
 				.filter((url) => url.startsWith('@') || url.startsWith('https://t.me/'))
 				.map((url) => (url.startsWith('@') ? `https://t.me/${url.slice(1)}` : url))
