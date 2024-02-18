@@ -4,6 +4,10 @@ interface Env {
 	BOT_TOKEN: string;
 }
 
+interface Skip {
+	reason: string;
+}
+
 async function replyError(ctx: Context, next: NextFunction): Promise<void> {
 	try {
 		await next();
@@ -18,34 +22,55 @@ export default {
 
 		bot.use(replyError);
 		bot.on('message', async (ctx) => {
-			let usernames = new Array<string>();
+			let names = new Array<string | Skip>();
 
 			const forwardOrigin = ctx.message.forward_origin;
-			if (forwardOrigin?.type === 'channel' && forwardOrigin.chat.username !== undefined) {
-				usernames.push(`@${forwardOrigin.chat.username}`);
+			if (forwardOrigin?.type === 'channel') {
+				if (forwardOrigin.chat.username === undefined) {
+					names.push({ reason: `forward origin channel ${forwardOrigin.chat.title} has no username` });
+				} else {
+					names.push(`@${forwardOrigin.chat.username}`);
+				}
 			}
 
 			for (const entity of ctx.message.entities ?? []) {
 				const content = ctx.message.text!.slice(entity.offset, entity.offset + entity.length);
 				switch (entity.type) {
 					case 'mention':
-						if (content.toLowerCase().endsWith('bot')) continue;
-						usernames.push(content);
+						if (content.toLowerCase().endsWith('bot')) {
+							names.push({ reason: `${content} is a bot` });
+							continue;
+						}
+						names.push(content);
 						break;
 					case 'url':
 					case 'text_link':
-						let url = entity.type === 'text_link' ? new URL(entity.url) : new URL(content);
+						let url;
+						try {
+							url = entity.type === 'text_link' ? new URL(entity.url) : new URL(content);
+						} catch (err: any) {
+							names.push({ reason: `${content} ${err.message}` });
+							continue;
+						}
 						if (url.hostname === 't.me') {
 							const [_, username] = url.pathname.split('/');
-							if (username.startsWith('+')) continue;
-							else if (username.endsWith('bot')) continue;
-							usernames.push(`@${username}`);
+							if (username.startsWith('+')) {
+								names.push({ reason: `@${content} is private` });
+								continue;
+							} else if (username.toLowerCase().endsWith('bot')) {
+								names.push({ reason: `@${username} is a bot` });
+								continue;
+							}
+							names.push(`@${username}`);
 						}
 						break;
 				}
 			}
 
-			usernames = Array.from(new Set(usernames)).sort();
+			names = Array.from(new Set(names)).sort();
+			const usernames = names.filter((username): username is string => typeof username === 'string');
+			const skipUsernames = names.filter((username): username is Skip => typeof username !== 'string');
+
 			const promises = usernames.map((username) =>
 				(async () => {
 					try {
@@ -56,14 +81,20 @@ export default {
 							case 'channel':
 								return `${username} ${chat.title}`;
 							default:
-								return `${username}`;
+								return { reason: `${username} is private` };
 						}
 					} catch (err: any) {
-						return `${username} ${err.message}`;
+						return { reason: `${username} ${err.message}` };
 					}
 				})()
 			);
-			const titles = await Promise.all(promises);
+			const contents = await Promise.all(promises);
+			const titles = contents.filter((content): content is string => typeof content === 'string');
+			const skips = skipUsernames.concat(contents.filter((content): content is Skip => typeof content !== 'string'));
+
+			if (skips.length > 0) {
+				await ctx.reply(skips.map((skip) => skip.reason).join('\n'));
+			}
 			if (titles.length === 0) {
 				await ctx.react('🤔');
 				return;
