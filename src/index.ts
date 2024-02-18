@@ -10,8 +10,6 @@ interface Chat {
 }
 
 async function resolveWithContext<C extends Context>(url: string, ctx: C): Promise<Chat> {
-	if (url.startsWith('https://t.me/')) url = `@${url.slice(13)}`;
-	else if (!url.startsWith('@')) throw Error(`${url} is invalid`);
 	if (url.includes('/')) url = url.split('/')[0];
 
 	const chat = await ctx.api.getChat(url);
@@ -26,9 +24,8 @@ async function resolveWithContext<C extends Context>(url: string, ctx: C): Promi
 }
 
 async function resolve<C extends Context>(url: string, ctx?: C): Promise<Chat> {
-	if (ctx) return await resolveWithContext(url, ctx);
-	if (!url.startsWith('https://t.me/') && !url.startsWith('@')) throw Error(`${url} is invalid`);
-	if (url.startsWith('@')) url = `https://t.me/${url.slice(1)}`;
+	if (!url.startsWith('https://t.me/')) throw Error(`${url} is not a valid Telegram link`);
+	if (ctx) return await resolveWithContext(`@${url.slice(13)}`, ctx);
 
 	const text = await (await fetch(url)).text();
 	const matches = [...text.matchAll(/property="og:title" content="(.*)"/g)];
@@ -69,35 +66,37 @@ export default {
 						break;
 				}
 			}
+			urls = Array.from(new Set(urls))
+				.filter((url) => url.startsWith('@') || url.startsWith('https://t.me/'))
+				.map((url) => (url.startsWith('@') ? `https://t.me/${url.slice(1)}` : url))
+				.sort();
 
 			let more = new Array<string>();
-			urls = Array.from(new Set(urls)).sort();
 			if (urls.length > 30) {
 				more = urls.slice(30);
 				urls = urls.slice(0, 30);
 				await ctx.react('🤯');
 			}
 
-			let titles = new Array<string>();
+			let chats = new Array<string>();
 			let errors = new Array<string>();
-			await Promise.all(
-				urls.map(async (url) => {
-					try {
-						const chat = await resolve(url);
-						const parts = chat.url.slice(13).split('/');
-						if (parts.length == 1 && !parts[0].startsWith('+')) {
-							titles.push(`@${parts[0]} ${chat.title}`);
-						} else {
-							titles.push(`<a href="${chat.url}">${chat.title}</a>`);
-						}
-					} catch (err: any) {
-						errors.push(err.message as string);
+			const settled = await Promise.allSettled(urls.map((url) => resolve(url)));
+			for (const result of settled) {
+				if (result.status === 'fulfilled') {
+					const chat = result.value;
+					const parts = chat.url.slice(13).split('/');
+					if (parts.length == 1 && !parts[0].startsWith('+')) {
+						chats.push(`@${parts[0]} ${chat.title}`);
+					} else {
+						chats.push(`<a href="${chat.url}">${chat.title}</a>`);
 					}
-				})
-			);
+				} else {
+					errors.push(result.reason.message);
+				}
+			}
 
 			if (errors.length > 0) await ctx.reply(errors.join('\n'));
-			if (titles.length > 0) await ctx.api.sendMessage(ctx.chat.id, titles.join('\n'), { parse_mode: 'HTML' });
+			if (chats.length > 0) await ctx.api.sendMessage(ctx.chat.id, chats.join('\n'), { parse_mode: 'HTML' });
 			else await ctx.react('🤔');
 			if (more.length > 0) await ctx.reply(more.join('\n'));
 		});
