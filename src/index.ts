@@ -29,7 +29,7 @@ export default {
 				const content = ctx.message.text!.slice(entity.offset, entity.offset + entity.length);
 				switch (entity.type) {
 					case 'mention':
-						if (content.endsWith('bot')) continue;
+						if (content.toLowerCase().endsWith('bot')) continue;
 						usernames.push(content);
 						break;
 					case 'url':
@@ -45,7 +45,7 @@ export default {
 				}
 			}
 
-			usernames = Array.from(new Set(usernames));
+			usernames = Array.from(new Set(usernames)).sort();
 			const promises = usernames.map((username) =>
 				(async () => {
 					try {
