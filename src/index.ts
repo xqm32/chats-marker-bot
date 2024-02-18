@@ -68,8 +68,15 @@ export default {
 			}
 
 			names = Array.from(new Set(names)).sort();
-			const usernames = names.filter((username): username is string => typeof username === 'string');
-			const skipUsernames = names.filter((username): username is Skip => typeof username !== 'string');
+			let usernames = names.filter((username): username is string => typeof username === 'string');
+			let skipUsernames = names.filter((username): username is Skip => typeof username !== 'string');
+
+			let replyMore;
+			if (usernames.length > 30) {
+				const more = usernames.slice(30);
+				replyMore = () => ctx.reply(more.join('\n'));
+				usernames = usernames.slice(0, 30);
+			}
 
 			const promises = usernames.map((username) =>
 				(async () => {
@@ -100,6 +107,7 @@ export default {
 				return;
 			}
 			await ctx.reply(titles.join('\n'));
+			if (replyMore) await replyMore();
 		});
 
 		return await webhookCallback(bot, 'cloudflare-mod')(request);
