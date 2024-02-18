@@ -4,8 +4,25 @@ interface Env {
 	BOT_TOKEN: string;
 }
 
-interface Skip {
-	reason: string;
+interface Chat {
+	url: string;
+	title: string;
+}
+
+async function resolveWithAPI<C extends Context>(ctx: C, url: string): Promise<Chat> {
+	if (url.startsWith('https://t.me/')) url = `@${url.slice(13)}`;
+	else if (!url.startsWith('@')) throw Error(`${url} is invalid`);
+	if (url.includes('/')) url = url.split('/')[0];
+
+	const chat = await ctx.api.getChat(url);
+	switch (chat.type) {
+		case 'channel':
+		case 'group':
+		case 'supergroup':
+			return { url, title: chat.title };
+		default:
+			throw Error(`${url} is not a channel or group`);
+	}
 }
 
 async function replyError(ctx: Context, next: NextFunction): Promise<void> {
@@ -22,92 +39,47 @@ export default {
 
 		bot.use(replyError);
 		bot.on('message', async (ctx) => {
-			let names = new Array<string | Skip>();
+			let urls = new Array<string>();
 
 			const forwardOrigin = ctx.message.forward_origin;
-			if (forwardOrigin?.type === 'channel') {
-				if (forwardOrigin.chat.username === undefined) {
-					names.push({ reason: `forward origin channel ${forwardOrigin.chat.title} has no username` });
-				} else {
-					names.push(`@${forwardOrigin.chat.username}`);
-				}
+			if (forwardOrigin?.type === 'channel' && forwardOrigin.chat.username) {
+				urls.push(`@${forwardOrigin.chat.username}`);
 			}
 
 			for (const entity of ctx.message.entities ?? []) {
-				const content = ctx.message.text!.slice(entity.offset, entity.offset + entity.length);
+				const text = ctx.message.text!.slice(entity.offset, entity.offset + entity.length);
 				switch (entity.type) {
 					case 'mention':
-						if (content.toLowerCase().endsWith('bot')) {
-							names.push({ reason: `${content} is a bot` });
-							continue;
-						}
-						names.push(content);
-						break;
 					case 'url':
+						urls.push(text);
+						break;
 					case 'text_link':
-						let url;
-						try {
-							url = entity.type === 'text_link' ? new URL(entity.url) : new URL(content);
-						} catch (err: any) {
-							names.push({ reason: `${content} ${err.message}` });
-							continue;
-						}
-						if (url.hostname === 't.me') {
-							const [_, username] = url.pathname.split('/');
-							if (username.startsWith('+')) {
-								names.push({ reason: `@${content} is private` });
-								continue;
-							} else if (username.toLowerCase().endsWith('bot')) {
-								names.push({ reason: `@${username} is a bot` });
-								continue;
-							}
-							names.push(`@${username}`);
-						}
+						urls.push(entity.url);
 						break;
 				}
 			}
 
-			names = Array.from(new Set(names)).sort();
-			let usernames = names.filter((username): username is string => typeof username === 'string');
-			let skipUsernames = names.filter((username): username is Skip => typeof username !== 'string');
-
-			let replyMore;
-			if (usernames.length > 30) {
-				const more = usernames.slice(30);
-				replyMore = () => ctx.reply(more.join('\n'));
-				usernames = usernames.slice(0, 30);
-			}
-
-			const promises = usernames.map((username) =>
-				(async () => {
+			let titles = new Array<string>();
+			let errors = new Array<string>();
+			await Promise.all(
+				Array.from(new Set(urls)).map(async (url) => {
 					try {
-						const chat = await ctx.api.getChat(username);
-						switch (chat.type) {
-							case 'group':
-							case 'supergroup':
-							case 'channel':
-								return `${username} ${chat.title}`;
-							default:
-								return { reason: `${username} is private` };
-						}
+						const chat = await resolveWithAPI(ctx, url);
+						titles.push(`${chat.url} ${chat.title}`);
 					} catch (err: any) {
-						return { reason: `${username} ${err.message}` };
+						errors.push(err.message as string);
 					}
-				})()
+				})
 			);
-			const contents = await Promise.all(promises);
-			const titles = contents.filter((content): content is string => typeof content === 'string');
-			const skips = skipUsernames.concat(contents.filter((content): content is Skip => typeof content !== 'string'));
 
-			if (skips.length > 0) {
-				await ctx.reply(skips.map((skip) => skip.reason).join('\n'));
-			}
 			if (titles.length === 0) {
 				await ctx.react('🤔');
 				return;
 			}
 			await ctx.reply(titles.join('\n'));
-			if (replyMore) await replyMore();
+			if (errors.length > 0) {
+				await ctx.reply(errors.join('\n'));
+			}
 		});
 
 		return await webhookCallback(bot, 'cloudflare-mod')(request);
