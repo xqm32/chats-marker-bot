@@ -4,7 +4,7 @@ _Chats Marker Bot_ is a Telegram bot helps mark channels and groups. Just send o
 
 ## How to deploy
 
-Fork this GitHub repository, add a repository secrets CLOUDFLARE_API_TOKEN with a [CloudFlare API Token](https://dash.cloudflare.com/profile/api-tokens). Then enable GitHub Actions and manually run the deploy workflow.
+Fork this GitHub repository, add a repository secrets `CLOUDFLARE_API_TOKEN` with a [CloudFlare API Token](https://dash.cloudflare.com/profile/api-tokens). Then enable GitHub Actions and manually run the deploy workflow.
 
 A Telegram bot token is required to configure, which can be created with [BotFather](https://t.me/BotFather). After the bot token created, open CloudFlare worker settings and add an environment variable `BOT_TOKEN`.
 
