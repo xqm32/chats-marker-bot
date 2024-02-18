@@ -19,7 +19,7 @@ async function resolveWithContext<C extends Context>(url: string, ctx: C): Promi
 		case 'channel':
 		case 'group':
 		case 'supergroup':
-			return { url, title: chat.title };
+			return { url: `https://t.me/${url.slice(1)}`, title: chat.title };
 		default:
 			throw Error(`${url} is not a channel or group`);
 	}
@@ -70,32 +70,36 @@ export default {
 				}
 			}
 
+			let more = new Array<string>();
+			urls = Array.from(new Set(urls)).sort();
 			if (urls.length > 30) {
+				more = urls.slice(30);
+				urls = urls.slice(0, 30);
 				await ctx.react('🤯');
-				return;
 			}
 
 			let titles = new Array<string>();
 			let errors = new Array<string>();
 			await Promise.all(
-				Array.from(new Set(urls)).map(async (url) => {
+				urls.map(async (url) => {
 					try {
-						const chat = await resolve(url, ctx);
-						titles.push(`${chat.url} ${chat.title}`);
+						const chat = await resolve(url);
+						const parts = chat.url.slice(13).split('/');
+						if (parts.length == 1 && !parts[0].startsWith('+')) {
+							titles.push(`@${parts[0]} ${chat.title}`);
+						} else {
+							titles.push(`<a href="${chat.url}">${chat.title}</a>`);
+						}
 					} catch (err: any) {
 						errors.push(err.message as string);
 					}
 				})
 			);
 
-			if (titles.length === 0) {
-				await ctx.react('🤔');
-				return;
-			}
-			await ctx.reply(titles.join('\n'));
-			if (errors.length > 0) {
-				await ctx.reply(errors.join('\n'));
-			}
+			if (errors.length > 0) await ctx.reply(errors.join('\n'));
+			if (titles.length > 0) await ctx.api.sendMessage(ctx.chat.id, titles.join('\n'), { parse_mode: 'HTML' });
+			else await ctx.react('🤔');
+			if (more.length > 0) await ctx.reply(more.join('\n'));
 		});
 
 		return await webhookCallback(bot, 'cloudflare-mod')(request);
