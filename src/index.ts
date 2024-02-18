@@ -9,7 +9,7 @@ interface Chat {
 	title: string;
 }
 
-async function resolveWithAPI<C extends Context>(ctx: C, url: string): Promise<Chat> {
+async function resolveWithContext<C extends Context>(url: string, ctx: C): Promise<Chat> {
 	if (url.startsWith('https://t.me/')) url = `@${url.slice(13)}`;
 	else if (!url.startsWith('@')) throw Error(`${url} is invalid`);
 	if (url.includes('/')) url = url.split('/')[0];
@@ -23,6 +23,17 @@ async function resolveWithAPI<C extends Context>(ctx: C, url: string): Promise<C
 		default:
 			throw Error(`${url} is not a channel or group`);
 	}
+}
+
+async function resolve<C extends Context>(url: string, ctx?: C): Promise<Chat> {
+	if (ctx) return await resolveWithContext(url, ctx);
+	if (!url.startsWith('https://t.me/') && !url.startsWith('@')) throw Error(`${url} is invalid`);
+	if (url.startsWith('@')) url = `https://t.me/${url.slice(1)}`;
+
+	const text = await (await fetch(url)).text();
+	const matches = [...text.matchAll(/property="og:title" content="(.*)"/g)];
+	if (matches.length === 0) throw Error('${url} has no title');
+	return { url, title: matches[0][1] };
 }
 
 async function replyError(ctx: Context, next: NextFunction): Promise<void> {
@@ -64,7 +75,7 @@ export default {
 			await Promise.all(
 				Array.from(new Set(urls)).map(async (url) => {
 					try {
-						const chat = await resolveWithAPI(ctx, url);
+						const chat = await resolve(url, ctx);
 						titles.push(`${chat.url} ${chat.title}`);
 					} catch (err: any) {
 						errors.push(err.message as string);
