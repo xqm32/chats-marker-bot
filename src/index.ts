@@ -1,4 +1,4 @@
-import { Bot, Context, NextFunction, webhookCallback } from 'grammy';
+import { Bot, Context, Filter, NextFunction, webhookCallback } from 'grammy';
 
 interface Env {
 	BOT_TOKEN: string;
@@ -41,37 +41,60 @@ async function replyError(ctx: Context, next: NextFunction): Promise<void> {
 	}
 }
 
+type ContextMessage = Filter<Context, 'message'>['message'];
+type ReplyMessage = ContextMessage['reply_to_message'];
+type Message = NonNullable<ContextMessage | ReplyMessage>;
+function collectUrls(message: Message): string[] {
+	let urls = new Array<string>();
+
+	const forwardOrigin = message.forward_origin;
+	if (forwardOrigin?.type === 'channel' && forwardOrigin.chat.username) {
+		urls.push(`@${forwardOrigin.chat.username}`);
+	}
+
+	const messageText = message.text;
+	if (messageText !== undefined) {
+		message.entities?.forEach((entity) => {
+			const text = messageText.slice(entity.offset, entity.offset + entity.length);
+			switch (entity.type) {
+				case 'mention':
+				case 'url':
+					urls.push(text);
+					break;
+				case 'text_link':
+					urls.push(entity.url);
+					break;
+			}
+		});
+	}
+
+	return Array.from(new Set(urls))
+		.filter((url) => url.startsWith('@') || url.startsWith('https://t.me/'))
+		.map((url) => (url.startsWith('@') ? `https://t.me/${url.slice(1)}` : url))
+		.sort();
+}
+
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const bot = new Bot(env.BOT_TOKEN);
 
 		bot.use(replyError);
-		bot.on('message', async (ctx) => {
-			let urls = new Array<string>();
-
-			const forwardOrigin = ctx.message.forward_origin;
-			if (forwardOrigin?.type === 'channel' && forwardOrigin.chat.username) {
-				urls.push(`@${forwardOrigin.chat.username}`);
+		bot.command('collect', async (ctx) => {
+			const replyMessage = ctx.message?.reply_to_message;
+			if (replyMessage === undefined) {
+				await ctx.react('🤨');
+				return;
+			}
+			await ctx.reply(collectUrls(replyMessage).join('\n'));
+		});
+		bot.command('resolve', async (ctx) => {
+			const replyMessage = ctx.message?.reply_to_message;
+			if (replyMessage === undefined) {
+				await ctx.react('🤨');
+				return;
 			}
 
-			for (const entity of ctx.message.entities ?? []) {
-				const text = ctx.message.text!.slice(entity.offset, entity.offset + entity.length);
-				switch (entity.type) {
-					case 'mention':
-					case 'url':
-						urls.push(text);
-						break;
-					case 'text_link':
-						urls.push(entity.url);
-						break;
-				}
-			}
-
-			urls = Array.from(new Set(urls))
-				.filter((url) => url.startsWith('@') || url.startsWith('https://t.me/'))
-				.map((url) => (url.startsWith('@') ? `https://t.me/${url.slice(1)}` : url))
-				.sort();
-
+			let urls = collectUrls(replyMessage);
 			let more = new Array<string>();
 			if (urls.length > 30) {
 				more = urls.slice(30);
@@ -100,6 +123,9 @@ export default {
 			if (chats.length > 0) await ctx.api.sendMessage(ctx.chat.id, chats.join('\n'), { parse_mode: 'HTML' });
 			else await ctx.react('🤔');
 			if (more.length > 0) await ctx.reply(more.join('\n'));
+		});
+		bot.on('message', async (ctx) => {
+			await ctx.react('🥰');
 		});
 
 		return await webhookCallback(bot, 'cloudflare-mod')(request);
