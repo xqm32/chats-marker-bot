@@ -9,6 +9,14 @@ interface Chat {
 	title: string;
 }
 
+async function replyError(ctx: Context, next: NextFunction): Promise<void> {
+	try {
+		await next();
+	} catch (err: any) {
+		await ctx.reply(err.message);
+	}
+}
+
 async function resolveWithContext<C extends Context>(url: string, ctx: C): Promise<Chat> {
 	if (url.includes('/')) url = url.split('/')[0];
 
@@ -33,12 +41,27 @@ async function resolve<C extends Context>(url: string, ctx?: C): Promise<Chat> {
 	return { url, title: matches[0][1] };
 }
 
-async function replyError(ctx: Context, next: NextFunction): Promise<void> {
-	try {
-		await next();
-	} catch (err: any) {
-		await ctx.reply(err.message);
+async function resolveUrls(urls: string[]): Promise<{
+	chats: string[];
+	errors: string[];
+}> {
+	let chats = new Array<string>();
+	let errors = new Array<string>();
+	const settled = await Promise.allSettled(urls.map((url) => resolve(url)));
+	for (const result of settled) {
+		if (result.status === 'fulfilled') {
+			const chat = result.value;
+			const parts = chat.url.slice(13).split('/');
+			if (parts.length == 1 && !parts[0].startsWith('+')) {
+				chats.push(`@${parts[0]} ${chat.title}`);
+			} else {
+				chats.push(`<a href="${chat.url}">${chat.title}</a>`);
+			}
+		} else {
+			errors.push(result.reason.message);
+		}
 	}
+	return { chats, errors };
 }
 
 type ContextMessage = Filter<Context, 'message'>['message'];
@@ -102,27 +125,27 @@ export default {
 				await ctx.react('🤯');
 			}
 
-			let chats = new Array<string>();
-			let errors = new Array<string>();
-			const settled = await Promise.allSettled(urls.map((url) => resolve(url)));
-			for (const result of settled) {
-				if (result.status === 'fulfilled') {
-					const chat = result.value;
-					const parts = chat.url.slice(13).split('/');
-					if (parts.length == 1 && !parts[0].startsWith('+')) {
-						chats.push(`@${parts[0]} ${chat.title}`);
-					} else {
-						chats.push(`<a href="${chat.url}">${chat.title}</a>`);
-					}
-				} else {
-					errors.push(result.reason.message);
-				}
-			}
-
+			const { chats, errors } = await resolveUrls(urls);
 			if (errors.length > 0) await ctx.reply(errors.join('\n'));
 			if (chats.length > 0) await ctx.api.sendMessage(ctx.chat.id, chats.join('\n'), { parse_mode: 'HTML' });
 			else await ctx.react('🤔');
 			if (more.length > 0) await ctx.reply(more.join('\n'));
+		});
+		bot.command('format', async (ctx) => {
+			let lines = ctx.message?.reply_to_message?.text?.split('\n');
+			if (lines === undefined) {
+				await ctx.react('🤨');
+				return;
+			}
+
+			let formatLines = new Array<string>();
+			let otherLines = new Array<string>();
+			for (const line of lines) {
+				if (line.startsWith('@') || line.startsWith('https://t.me')) formatLines.push(line);
+				else otherLines.push(line);
+			}
+
+			await ctx.reply(otherLines.concat(formatLines.sort()).join('\n'));
 		});
 		bot.on('message', async (ctx) => {
 			await ctx.react('🥰');
